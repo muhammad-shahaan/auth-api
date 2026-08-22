@@ -86,27 +86,31 @@ cd auth-api
 
 ### 2. Install Dependencies
 
+Using `requirements.txt`:
+
 ```bash
-py -m pip install fastapi uvicorn supabase python-dotenv
+py -m pip install -r requirements.txt
 ```
 
 ### 3. Create a Supabase Project
 
-Create a project at Supabase and obtain:
+Create a Supabase project and obtain:
 
 - Project URL
 - Publishable / Anon Key
 
 ### 4. Create Environment Variables
 
-Create a `.env` file in the project directory:
+Create a `.env` file in the project directory.
+
+You can use `.env.example` as a template:
 
 ```env
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_publishable_key
 ```
 
-The `.env` file is ignored by Git and must never be committed to GitHub.
+The real `.env` file is ignored by Git and must never be committed to GitHub.
 
 ### 5. Run the API
 
@@ -114,7 +118,7 @@ The `.env` file is ignored by Git and must never be committed to GitHub.
 py -m uvicorn main:app --reload
 ```
 
-The API will run at:
+The API will run locally at:
 
 ```text
 http://127.0.0.1:8000
@@ -128,18 +132,18 @@ FastAPI automatically provides interactive API documentation at:
 http://127.0.0.1:8000/docs
 ```
 
-The protected routes display a lock icon because the API uses FastAPI's `HTTPBearer` security scheme.
+Protected routes display a lock icon because the API uses FastAPI's `HTTPBearer` security scheme.
 
 ### Testing Authentication in Swagger
 
 1. Run `POST /auth/login`.
 2. Copy only the returned `access_token`.
 3. Click the lock icon on a protected route.
-4. Paste the JWT into the authorization value field.
+4. Paste only the JWT into the authorization value field.
 5. Click **Authorize**.
 6. Test `/protected/profile` or `/protected/dashboard`.
 
-Swagger automatically sends:
+Swagger automatically sends the token using:
 
 ```text
 Authorization: Bearer <access_token>
@@ -147,7 +151,7 @@ Authorization: Bearer <access_token>
 
 ## Tested Authentication Behaviour
 
-The API was tested through Swagger UI.
+The authentication flow was tested through Swagger UI.
 
 ### Successful Login
 
@@ -157,11 +161,11 @@ A valid email and password return:
 200 OK
 ```
 
-along with an Access Token and Refresh Token.
+The response includes an Access Token and Refresh Token.
 
 ### Protected Route Without Token
 
-Calling a protected endpoint without authentication is rejected.
+Calling a protected endpoint without authentication returns:
 
 ```text
 401 Unauthorized
@@ -169,13 +173,13 @@ Calling a protected endpoint without authentication is rejected.
 
 ### Protected Route With Valid Token
 
-After authorization with a valid JWT:
+After authorizing with a valid JWT, a protected endpoint returns:
 
 ```text
 200 OK
 ```
 
-The API returns authenticated user information.
+The API then returns authenticated user information.
 
 ### Logout
 
@@ -187,17 +191,23 @@ A valid authenticated logout request returns:
 
 ## Security
 
-Sensitive Supabase credentials are stored in environment variables rather than directly in source code.
+Sensitive Supabase credentials are stored in environment variables rather than directly in the source code.
 
-The following file is excluded through `.gitignore`:
+The real environment file is excluded through `.gitignore`:
 
 ```text
 .env
 ```
 
-The project does not publish passwords, Supabase keys, access tokens, or refresh tokens to GitHub.
+The project does not intentionally publish passwords, Supabase keys, access tokens, or refresh tokens to GitHub.
 
 Protected routes use a reusable FastAPI dependency to verify the authenticated user before allowing access.
+
+## Swagger UI Screenshot
+
+The screenshot below shows the Auth API routes in FastAPI Swagger UI, including the protected endpoints with Bearer authentication.
+
+![Auth API Swagger UI](screenshots/swagger-ui.png)
 
 ## What I Learned
 
