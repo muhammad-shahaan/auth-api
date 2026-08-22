@@ -1,16 +1,15 @@
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
     HTTPException,
-    Header,
     Depends,
     Response
 )
-from supabase import create_client, Client
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from supabase import create_client, Client
 
 
 # =========================================================
@@ -49,6 +48,13 @@ app = FastAPI(
 
 
 # =========================================================
+# SWAGGER BEARER AUTH
+# =========================================================
+
+security = HTTPBearer()
+
+
+# =========================================================
 # MODELS
 # =========================================================
 
@@ -62,26 +68,9 @@ class AuthRequest(BaseModel):
 # =========================================================
 
 def get_current_user(
-    authorization: Optional[str] = Header(default=None)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Access token required"
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Access token required"
-        )
-
-    token = authorization.replace(
-        "Bearer ",
-        "",
-        1
-    ).strip()
+    token = credentials.credentials
 
     if not token:
         raise HTTPException(
@@ -211,7 +200,6 @@ def login(data: AuthRequest):
 def protected_profile(
     user=Depends(get_current_user)
 ):
-
     return {
         "message": "Protected profile accessed successfully",
         "user_id": user.id,
@@ -228,7 +216,6 @@ def protected_profile(
 def protected_dashboard(
     user=Depends(get_current_user)
 ):
-
     return {
         "message": "Welcome to your protected dashboard",
         "user_id": user.id,
@@ -247,7 +234,6 @@ def protected_dashboard(
 def logout(
     user=Depends(get_current_user)
 ):
-
     try:
         supabase.auth.sign_out()
 
