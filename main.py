@@ -1,4 +1,7 @@
 import os
+import json
+import time
+from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -8,8 +11,9 @@ from fastapi import (
     Response
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 from supabase import create_client, Client
+from groq import Groq
 
 
 # =========================================================
@@ -21,6 +25,9 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+AI_ENABLED = os.getenv("AI_ENABLED", "true").lower() == "true"
+
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError(
         "Supabase environment variables are missing"
@@ -28,13 +35,22 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 
 # =========================================================
-# SUPABASE CLIENT
+# CLIENTS
 # =========================================================
 
 supabase: Client = create_client(
     SUPABASE_URL,
     SUPABASE_KEY
 )
+
+groq_client = None
+
+if GROQ_API_KEY:
+    groq_client = Groq(
+        api_key=GROQ_API_KEY,
+        timeout=10.0,
+        max_retries=0
+    )
 
 
 # =========================================================
@@ -43,7 +59,7 @@ supabase: Client = create_client(
 
 app = FastAPI(
     title="Auth Practice API",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 
@@ -61,6 +77,35 @@ security = HTTPBearer()
 class AuthRequest(BaseModel):
     email: str
     password: str
+
+
+class MessageRequest(BaseModel):
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000
+    )
+
+
+class AIJudgement(BaseModel):
+    category: Literal[
+        "internship",
+        "job",
+        "support",
+        "general"
+    ]
+
+    priority: Literal[
+        "low",
+        "medium",
+        "high"
+    ]
+
+    summary: str = Field(
+        ...,
+        min_length=1,
+        max_length=300
+    )
 
 
 # =========================================================
@@ -100,6 +145,129 @@ def get_current_user(
 
 
 # =========================================================
+# AI CLASSIFICATION FUNCTION
+# =========================================================
+
+def classify_with_ai(message: str) -> AIJudgement:
+
+    if not AI_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="AI feature is currently disabled"
+        )
+
+    if not groq_client:
+        raise HTTPException(
+            status_code=503,
+            detail="AI service is not configured"
+        )
+
+    prompt = f"""
+You classify incoming messages.
+
+Return ONLY valid JSON.
+
+Allowed categories:
+- internship
+- job
+- support
+- general
+
+Allowed priorities:
+- low
+- medium
+- high
+
+Required JSON format:
+
+{{
+  "category": "internship",
+  "priority": "medium",
+  "summary": "Short summary here"
+}}
+
+Message:
+{message}
+"""
+
+    max_attempts = 3
+
+    for attempt in range(1, max_attempts + 1):
+
+        try:
+            response = groq_client.chat.completions.create(
+               model="openai/gpt-oss-20b",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a message classification API. "
+                            "Return only valid JSON."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0
+            )
+
+            raw_output = response.choices[0].message.content
+
+            if not raw_output:
+                raise ValueError(
+                    "AI returned an empty response"
+                )
+
+            parsed_json = json.loads(raw_output)
+
+            judgement = AIJudgement.parse_obj(
+                parsed_json
+            )
+
+            return judgement
+
+        except (
+            json.JSONDecodeError,
+            ValidationError,
+            ValueError
+        ) as error:
+
+            print(
+                f"Invalid AI output on attempt "
+                f"{attempt}: {error}"
+            )
+
+            # Invalid structured output is unlikely
+            # to improve forever, so retry only once.
+            if attempt >= 2:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "AI returned an invalid "
+                        "structured response"
+                    )
+                )
+
+        except Exception as error:
+
+            print(
+                f"AI request failed on attempt "
+                f"{attempt}: {error}"
+            )
+
+            if attempt == max_attempts:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI service unavailable"
+                )
+
+            # Small backoff before retrying
+            time.sleep(attempt)
+
+
+# =========================================================
 # ROOT
 # =========================================================
 
@@ -119,6 +287,21 @@ def public_info():
     return {
         "message": "Welcome stranger! This info is public."
     }
+
+
+# =========================================================
+# AI JUDGEMENT ENDPOINT
+# =========================================================
+
+@app.post(
+    "/ai/classify-message",
+    response_model=AIJudgement
+)
+def classify_message(data: MessageRequest):
+
+    return classify_with_ai(
+        data.message.strip()
+    )
 
 
 # =========================================================
@@ -178,8 +361,11 @@ def login(data: AuthRequest):
             )
 
         return {
-            "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token
+            "access_token":
+                response.session.access_token,
+
+            "refresh_token":
+                response.session.refresh_token
         }
 
     except HTTPException:
@@ -200,8 +386,11 @@ def login(data: AuthRequest):
 def protected_profile(
     user=Depends(get_current_user)
 ):
+
     return {
-        "message": "Protected profile accessed successfully",
+        "message":
+            "Protected profile accessed successfully",
+
         "user_id": user.id,
         "email": user.email,
         "created_at": user.created_at
@@ -216,8 +405,11 @@ def protected_profile(
 def protected_dashboard(
     user=Depends(get_current_user)
 ):
+
     return {
-        "message": "Welcome to your protected dashboard",
+        "message":
+            "Welcome to your protected dashboard",
+
         "user_id": user.id,
         "email": user.email
     }
@@ -234,6 +426,7 @@ def protected_dashboard(
 def logout(
     user=Depends(get_current_user)
 ):
+
     try:
         supabase.auth.sign_out()
 
